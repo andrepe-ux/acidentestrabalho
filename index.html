@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestão Acidentes Trabalho - Supabase</title>
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpolygon points='50,8 95,90 5,90' fill='%23F5A524'/%3E%3Ctext x='50' y='78' font-size='55' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%23151922'%3E!%3C/text%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<!-- SDK do Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+:root{
+  --bg-0:#12151d;
+  --bg-1:#181c26;
+  --panel:#f7f5ef;
+  --panel-alt:#eeece3;
+  --ink:#1c2029;
+  --amber:#f5a524;
+  --amber-dark:#c9840f;
+  --teal:#0ea5a0;
+  --teal-dark:#0b8480;
+  --rose:#e0555a;
+  --line:#2a2f3b;
+}
+
+*{font-family:'Inter',system-ui,sans-serif;}
+h1,.brand-font{font-family:'Barlow Condensed',system-ui,sans-serif;}
+
+body{
+  background:
+    radial-gradient(circle at 10% -10%, rgba(245,165,36,.08), transparent 45%),
+    radial-gradient(circle at 100% 0%, rgba(14,165,160,.10), transparent 40%),
+    linear-gradient(180deg,var(--bg-0),var(--bg-1));
+  min-height:100vh;
+}
+
+.hazard-rule{
+  height:8px;
+  border-radius:999px;
+  background:repeating-linear-gradient(135deg,var(--amber) 0 14px,var(--ink) 14px 28px);
+  opacity:.9;
+}
+
+.panel{ background:var(--panel); color:var(--ink); }
+
+.btn{
+  font-weight:600;
+  border-radius:.9rem;
+  padding:.6rem 1.1rem;
+  transition:transform .12s ease, box-shadow .12s ease, background .15s ease;
+  box-shadow:0 1px 2px rgba(0,0,0,.25);
+}
+.btn:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 6px 14px rgba(0,0,0,.28); }
+.btn:disabled{ cursor:not-allowed; opacity:.45; box-shadow:none; transform:none; }
+
+.btn-amber{ background:var(--amber); color:var(--ink); }
+.btn-amber:hover:not(:disabled){ background:var(--amber-dark); }
+.btn-teal{ background:var(--teal); color:#fff; }
+.btn-teal:hover:not(:disabled){ background:var(--teal-dark); }
+.btn-ghost{ background:#2a3140; color:#e7e9ee; }
+.btn-ghost:hover{ background:#343c4d; }
+.btn-tab{ background:#232a38; color:#c7cbd6; }
+.btn-tab.active{ background:var(--amber); color:var(--ink); }
+
+input:disabled, select:disabled{ opacity:.5; cursor:not-allowed; }
+th{ cursor:pointer; user-select:none; }
+th:hover{ background:#e2dfd3; }
+
+.card-metric{
+  background:var(--panel); color:var(--ink);
+  border-radius:1rem; padding:1rem 1.25rem;
+  border-left:5px solid var(--amber);
+}
+.card-metric b{ font-family:'Barlow Condensed'; font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; color:#6b7280; display:block; }
+.card-metric .val{ font-size:1.9rem; font-weight:800; font-family:'Barlow Condensed'; }
+
+.chart-box{ height:320px; position:relative; }
+</style>
+</head>
+
+<body class="p-6 text-white">
+<div class="max-w-7xl mx-auto relative">
+
+<div id="fileInfo" class="absolute top-0 right-0 bg-[#232a38] px-4 py-2 rounded-xl text-xs font-semibold shadow text-gray-300">
+  Status DB: <span id="dbStatus" class="text-amber-400">A ligar...</span>
+</div>
+
+<div class="flex items-center gap-3 mb-2">
+  <svg width="34" height="34" viewBox="0 0 100 100"><polygon points="50,8 95,90 5,90" fill="#F5A524"/><text x="50" y="78" font-size="55" font-family="Arial" font-weight="bold" text-anchor="middle" fill="#151922">!</text></svg>
+  <h1 class="text-3xl font-extrabold tracking-wide">Gestão Acidentes Trabalho Segurança Social</h1>
+</div>
+<div class="hazard-rule w-full mb-6"></div>
+
+<div class="flex gap-2 mb-6 flex-wrap">
+<button id="tabMain" onclick="showTab('main')" class="btn btn-tab active">Registos</button>
+<button id="tabDone" onclick="showTab('done')" class="btn btn-tab">Concluída</button>
+<button id="tabCharts" onclick="showTab('charts')" class="btn btn-tab">Gráficos</button>
+</div>
+
+<div class="flex gap-2 mb-6 flex-wrap items-center">
+<button id="excelBtn" onclick="exportExcel()" class="btn btn-teal">Exportar Excel</button>
+<button onclick="loadWorkers()" class="btn btn-ghost">Sincronizar / Atualizar</button>
+<input id="searchMatricula" placeholder="Pesquisar Matrícula" class="border p-2 rounded-xl text-black" oninput="render(this.value)">
+</div>
+
+<div id="dashboard" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+<div class="card-metric"><b>Total</b><div class="val" id="mTotal">0</div></div>
+<div class="card-metric" style="border-left-color:var(--teal)"><b>Ativos</b><div class="val" id="mActive">0</div></div>
+<div class="card-metric" style="border-left-color:#8b5cf6"><b>Concluídos</b><div class="val" id="mDone">0</div></div>
+<div class="card-metric" style="border-left-color:var(--rose)"><b>Média Dias</b><div class="val" id="mAvg">0</div></div>
+</div>
+
+<div class="mb-6 flex gap-2 items-center flex-wrap">
+<input type="date" id="bulkDate" class="text-black p-2 rounded-xl">
+<button onclick="bulkConclude()" class="btn btn-amber">Concluir até data</button>
+</div>
+
+<div id="formBlock" class="panel p-6 rounded-2xl shadow mb-6">
+<div class="grid grid-cols-1 md:grid-cols-8 gap-4">
+<input id="matricula" placeholder="Matrícula" class="border p-2 rounded-lg">
+<input id="nome" placeholder="Nome" class="border p-2 rounded-lg">
+<input id="centro" placeholder="Centro" class="border p-2 rounded-lg">
+<input id="inicio" type="date" class="border p-2 rounded-lg">
+<input id="fim" type="date" class="border p-2 rounded-lg">
+<input id="obs" placeholder="Observações" class="border p-2 rounded-lg">
+<label class="flex items-center gap-2"><input type="checkbox" id="comunicado"> Comunicado SS</label>
+<label class="flex items-center gap-2"><input type="checkbox" id="concluido"> Concluído</label>
+</div>
+<button onclick="addWorker()" class="btn btn-amber mt-4">Adicionar</button>
+</div>
+
+<div id="mainTab">
+<div id="tableBlock" class="panel rounded-2xl shadow overflow-x-auto">
+<table class="w-full text-sm">
+<thead class="bg-[var(--panel-alt)]"><tr>
+<th class="p-2" onclick="sortBy('id')">ID</th>
+<th class="p-2" onclick="sortBy('matricula')">Matrícula</th>
+<th class="p-2" onclick="sortBy('nome')">Nome</th>
+<th class="p-2" onclick="sortBy('centro')">Centro</th>
+<th class="p-2" onclick="sortBy('inicio')">Início</th>
+<th class="p-2" onclick="sortBy('fim')">Fim</th>
+<th class="p-2" onclick="sortBy('dias')">Dias</th>
+<th class="p-2">Obs</th><th class="p-2">SS</th><th class="p-2">Concl.</th><th class="p-2">Ações</th>
+</tr></thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+</div>
+
+<div id="doneTab" class="hidden">
+<div class="panel rounded-2xl shadow overflow-x-auto">
+<table class="w-full text-sm">
+<thead class="bg-[var(--panel-alt)]"><tr>
+<th class="p-2" onclick="sortBy('id')">ID</th>
+<th class="p-2" onclick="sortBy('matricula')">Matrícula</th>
+<th class="p-2" onclick="sortBy('nome')">Nome</th>
+<th class="p-2" onclick="sortBy('centro')">Centro</th>
+<th class="p-2" onclick="sortBy('inicio')">Início</th>
+<th class="p-2" onclick="sortBy('fim')">Fim</th>
+<th class="p-2" onclick="sortBy('dias')">Dias</th>
+<th class="p-2">Obs</th><th class="p-2">SS</th><th class="p-2">Concl.</th><th class="p-2">Ações</th>
+</tr></thead>
+<tbody id="doneBody"></tbody>
+</table>
+</div>
+</div>
+
+<div id="chartsTab" class="hidden">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="panel p-4 rounded-2xl shadow"><div class="chart-box"><canvas id="chartMonth"></canvas></div></div>
+<div class="panel p-4 rounded-2xl shadow"><div class="chart-box"><canvas id="chartRange"></canvas></div></div>
+<div class="panel p-4 rounded-2xl shadow md:col-span-2"><div class="chart-box"><canvas id="chartCenter"></canvas></div></div>
+</div>
+</div>
+
+</div>
+
+<script>
+// =========================================================================
+// 1. CONFIGURAÇÃO DO SUPABASE (Substitui com os teus dados)
+// =========================================================================
+const SUPABASE_URL = 'https://izeswedmiovglkucyyzi.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_UtZgC_cW0Oyz1zHRcWvKeA_8ODEj3jM';
+
+const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// =========================================================================
+// VARIÁVEIS GLOBAIS
+// =========================================================================
+Chart.register(ChartDataLabels);
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.color = '#1c2029';
+
+let workers=[], editId=null;
+let chartMonth, chartRange, chartCenter;
+let currentSort={key:'id',asc:true};
+
+const PALETTE=['#0ea5a0','#f5a524','#8b5cf6','#e0555a','#3b82f6','#22c55e','#eab308','#ec4899','#14b8a6','#f97316'];
+
+const diffDays=(s,e)=>{
+ const a=new Date(s), b=e?new Date(e):new Date();
+ return Math.max(1,Math.ceil((b-a)/86400000));
+};
+
+// =========================================================================
+// OPERAÇÕES SUPABASE (CRUD)
+// =========================================================================
+async function loadWorkers() {
+  document.getElementById('dbStatus').innerText = 'A carregar...';
+  document.getElementById('dbStatus').className = 'text-amber-400';
+
+  const { data, error } = await _supabase.from('acidentes').select('*');
+
+  if (error) {
+    console.error(error);
+    document.getElementById('dbStatus').innerText = 'Erro na Ligação';
+    document.getElementById('dbStatus').className = 'text-rose-400';
+    alert('Erro ao carregar dados do Supabase: ' + error.message);
+  } else {
+    workers = data || [];
+    document.getElementById('dbStatus').innerText = 'Online';
+    document.getElementById('dbStatus').className = 'text-emerald-400';
+    render(searchMatricula.value);
+  }
+}
+
+async function addWorker(){
+  if(!matricula.value||!nome.value||!inicio.value) return alert('Campos obrigatórios');
+  
+  // Obter o ID numérico máximo existente para gerar o próximo "00000XX"
+  let maxNum = 0;
+  workers.forEach(w => {
+    const num = parseInt(w.id, 10);
+    if (!isNaN(num) && num > maxNum) maxNum = num;
+  });
+  const newId = String(maxNum + 1).padStart(7, '0');
+
+  const newWorker = {
+    id: newId,
+    matricula: matricula.value,
+    nome: nome.value,
+    centro: centro.value.trim(),
+    inicio: inicio.value,
+    fim: fim.value || null,
+    obs: obs.value,
+    comunicado: comunicado.checked,
+    concluido: concluido.checked
+  };
+
+  const { error } = await _supabase.from('acidentes').insert([newWorker]);
+
+  if (error) {
+    alert('Erro ao adicionar: ' + error.message);
+  } else {
+    matricula.value=nome.value=centro.value=inicio.value=fim.value=obs.value='';
+    comunicado.checked=concluido.checked=false;
+    await loadWorkers();
+  }
+}
+
+async function toggleEdit(id){
+  if(editId===id){
+    const row=document.querySelector(`tr[data-id="${id}"]`);
+    const r=row.querySelectorAll('input');
+    
+    const updatedData = {
+      matricula: r[0].value,
+      nome: r[1].value,
+      centro: r[2].value.trim(),
+      inicio: r[3].value,
+      fim: r[4].value || null,
+      obs: r[5].value,
+      comunicado: r[6].checked,
+      concluido: r[7].checked
+    };
+
+    const { error } = await _supabase.from('acidentes').update(updatedData).eq('id', id);
+
+    if (error) {
+      alert('Erro ao atualizar: ' + error.message);
+    } else {
+      editId=null;
+      await loadWorkers();
+    }
+  } else {
+    editId=id;
+    render(searchMatricula.value);
+  }
+}
+
+async function reopen(id){ 
+  const { error } = await _supabase.from('acidentes').update({ concluido: false }).eq('id', id);
+  if (error) alert('Erro ao reabrir: ' + error.message);
+  else await loadWorkers();
+}
+
+async function bulkConclude(){
+  const date=bulkDate.value;
+  if(!date) return alert('Seleciona uma data');
+
+  const toUpdate = workers.filter(w => !w.concluido && w.fim && w.fim <= date).map(w => w.id);
+
+  if (toUpdate.length === 0) return alert('Nenhum registo elegível para concluir.');
+
+  const { error } = await _supabase.from('acidentes').update({ concluido: true }).in('id', toUpdate);
+
+  if (error) alert('Erro ao concluir em lote: ' + error.message);
+  else await loadWorkers();
+}
+
+// =========================================================================
+// RENDERIZAÇÃO & INTERFACE
+// =========================================================================
+function sortBy(key){
+ if(currentSort.key===key) currentSort.asc=!currentSort.asc;
+ else currentSort={key,asc:true};
+ render(searchMatricula.value);
+}
+
+function render(filter=''){
+ let list=[...workers].map(w=>({...w,dias:diffDays(w.inicio,w.fim)}));
+ if(filter) list=list.filter(w=>w.matricula.toLowerCase().includes(filter.toLowerCase()));
+
+ list.sort((a,b)=>{
+  let A=a[currentSort.key], B=b[currentSort.key];
+  if(currentSort.key==='dias'){A=a.dias;B=b.dias;}
+  if(A<B) return currentSort.asc?-1:1;
+  if(A>B) return currentSort.asc?1:-1;
+  return 0;
+ });
+
+ let activeHTML='', doneHTML='';
+ list.forEach(w=>{
+  const d=w.dias;
+  const e=editId===w.id;
+  const dis=e?'':'disabled';
+
+  const diasBadge = !w.concluido && d>29
+    ? `<span class="px-2 py-1 bg-[var(--amber)] text-[var(--ink)] rounded font-bold">${d}</span>`
+    : `<span class="font-bold">${d}</span>`;
+
+  const row=`<tr class="border-t ${w.concluido?'bg-gray-100 text-gray-500':''}" data-id="${w.id}">
+<td class="p-2">${w.id}</td>
+<td class="p-2"><input ${dis} value="${w.matricula||''}" class="border p-1 w-full rounded"></td>
+<td class="p-2"><input ${dis} value="${w.nome||''}" class="border p-1 w-full rounded"></td>
+<td class="p-2"><input ${dis} value="${w.centro||''}" class="border p-1 w-full rounded"></td>
+<td class="p-2"><input ${dis} type="date" value="${w.inicio||''}" class="border p-1 rounded"></td>
+<td class="p-2"><input ${dis} type="date" value="${w.fim||''}" class="border p-1 rounded"></td>
+<td class="p-2 text-center">${diasBadge}</td>
+<td class="p-2"><input ${dis} value="${w.obs||''}" class="border p-1 w-full rounded"></td>
+<td class="p-2 text-center"><input ${dis} type="checkbox" ${w.comunicado?'checked':''}></td>
+<td class="p-2 text-center"><input ${dis} type="checkbox" ${w.concluido?'checked':''}></td>
+<td class="p-2 text-center space-x-1 whitespace-nowrap">
+<button onclick="toggleEdit('${w.id}')" class="btn ${e?'btn-teal':'btn-ghost'} !py-1 !px-2 text-xs">${e?'Guardar':'Editar'}</button>
+${w.concluido?`<button onclick="reopen('${w.id}')" class="btn btn-amber !py-1 !px-2 text-xs">Reabrir</button>`:''}
+</td>
+</tr>`;
+
+  if(w.concluido) doneHTML+=row;
+  else activeHTML+=row;
+ });
+
+ tableBody.innerHTML=activeHTML;
+ doneBody.innerHTML=doneHTML;
+ updateDashboard();
+}
+
+function updateDashboard(){
+ const total=workers.length;
+ const done=workers.filter(w=>w.concluido).length;
+ const active=total-done;
+ const avg=Math.round(workers.reduce((s,w)=>s+diffDays(w.inicio,w.fim),0)/(total||1));
+ mTotal.innerText=total;
+ mActive.innerText=active;
+ mDone.innerText=done;
+ mAvg.innerText=avg;
+}
+
+function updateCharts(){
+ const currentYear=String(new Date().getFullYear());
+ const months={}, ranges={'1-15':0,'16-30':0,'31-60':0,'61-120':0,'+121':0}, centers={};
+ for(let mo=1;mo<=12;mo++) months[currentYear+'-'+String(mo).padStart(2,'0')]=0;
+ workers.forEach(w=>{
+  if(!w.inicio) return;
+  const m=w.inicio.slice(0,7);
+  if(m.startsWith(currentYear)) months[m]=(months[m]||0)+1;
+  const d=diffDays(w.inicio,w.fim);
+  if(d<=15) ranges['1-15']++; else if(d<=30) ranges['16-30']++; else if(d<=60) ranges['31-60']++; else if(d<=120) ranges['61-120']++; else ranges['+121']++;
+  const c=(w.centro||'Sem Centro').trim();
+  centers[c]=(centers[c]||0)+1;
+ });
+
+ const monthLabelsPT=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+ const sortedMonths=Object.keys(months).sort();
+ const monthValues=sortedMonths.map(m=>months[m]);
+ const monthLabels=sortedMonths.map(m=>monthLabelsPT[parseInt(m.slice(5,7),10)-1]);
+
+ const sortedCenters=Object.entries(centers).sort((a,b)=>b[1]-a[1]);
+ const centerLabels=sortedCenters.map(c=>c[0]);
+ const centerValues=sortedCenters.map(c=>c[1]);
+
+ const rangeColors=['#0ea5a0','#3b82f6','#f5a524','#f97316','#e0555a'];
+
+ chartMonth?.destroy(); chartRange?.destroy(); chartCenter?.destroy();
+
+ chartMonth=new Chart(document.getElementById('chartMonth'),{
+  type:'bar',
+  data:{labels:monthLabels,datasets:[{label:'Acidentes',data:monthValues,backgroundColor:'#0ea5a0',borderRadius:6,maxBarThickness:38}]},
+  options:{
+   maintainAspectRatio:false,
+   plugins:{
+    legend:{display:false},
+    title:{display:true,text:'Acidentes por Mês ('+currentYear+')',font:{size:15,weight:'700'},color:'#1c2029',padding:{bottom:10}},
+    datalabels:{anchor:'end',align:'top',color:'#1c2029',font:{weight:'700'}}
+   },
+   scales:{
+    y:{beginAtZero:true,ticks:{precision:0},grid:{color:'#e5e2d8'}},
+    x:{grid:{display:false}}
+   }
+  }
+ });
+
+ chartRange=new Chart(document.getElementById('chartRange'),{
+  type:'doughnut',
+  data:{labels:Object.keys(ranges),datasets:[{data:Object.values(ranges),backgroundColor:rangeColors,borderColor:'#f7f5ef',borderWidth:2}]},
+  options:{
+   maintainAspectRatio:false,
+   plugins:{
+    legend:{position:'bottom',labels:{color:'#1c2029',boxWidth:14,padding:12,font:{size:11}}},
+    title:{display:true,text:'Duração dos Casos (dias)',font:{size:15,weight:'700'},color:'#1c2029',padding:{bottom:10}},
+    datalabels:{
+     color:'#12151d',
+     font:{weight:'700',size:11},
+     formatter:(v,ctx)=>{
+      const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0);
+      return total? v+' ('+Math.round(v/total*100)+'%)' : v;
+     }
+    }
+   }
+  }
+ });
+
+ chartCenter=new Chart(document.getElementById('chartCenter'),{
+  type:'bar',
+  data:{labels:centerLabels,datasets:[{label:'Acidentes',data:centerValues,backgroundColor:centerLabels.map((_,i)=>PALETTE[i%PALETTE.length]),borderRadius:6,maxBarThickness:28}]},
+  options:{
+   indexAxis:'y',
+   maintainAspectRatio:false,
+   plugins:{
+    legend:{display:false},
+    title:{display:true,text:'Acidentes por Centro',font:{size:15,weight:'700'},color:'#1c2029',padding:{bottom:10}},
+    datalabels:{anchor:'end',align:'end',color:'#1c2029',font:{weight:'700'}}
+   },
+   scales:{
+    x:{beginAtZero:true,ticks:{precision:0},grid:{color:'#e5e2d8'}},
+    y:{grid:{display:false}}
+   }
+  }
+ });
+}
+
+function exportExcel(){
+ const ws=XLSX.utils.json_to_sheet(workers);
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,'Acidentes');
+ XLSX.writeFile(wb,'acidentes.xlsx');
+}
+
+function showTab(tab){
+ mainTab.classList.toggle('hidden',tab!=='main');
+ doneTab.classList.toggle('hidden',tab!=='done');
+ chartsTab.classList.toggle('hidden',tab!=='charts');
+ tabMain.classList.toggle('active',tab==='main');
+ tabDone.classList.toggle('active',tab==='done');
+ tabCharts.classList.toggle('active',tab==='charts');
+ if(tab==='charts') updateCharts();
+}
+
+// Arrancar a aplicação ao carregar a página
+window.onload = loadWorkers;
+</script>
+</body>
+</html>
